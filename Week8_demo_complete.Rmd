@@ -1,0 +1,224 @@
+---
+title: "Week 8 Demo"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse) # also loads dplyr and ggplot2
+library(here)
+```
+
+# Part 1: Data exploration
+
+Run the cell below to load the data
+
+```{r}
+washb_df = read_csv(here("data", "washb_subset.csv")) 
+head(washb_df)
+```
+
+Use the cell below to briefly explore the data. What are the treatment (`tr`) groups? What dates does the study cover? What do the values in `season` represent?
+
+```{r}
+
+```
+
+For this analysis, let's consider all interventions as a single pooled group. Use the cell below to create a `pooled_tr` variable in `washb_df` that is equal to "Any WASH Intervention" if `tr != "Control"` and "Control" if `tr == "Control"`
+
+```{r}
+washb_df = washb_df %>% 
+  mutate(pooled_tr = ifelse(tr == "Control", "Control", "Any WASH Intervention"))
+```
+
+Estimate the prevalence of diarrhea (`diar7d`) in the pooled vs intervention group.
+
+```{r}
+washb_df %>% 
+  group_by(pooled_tr) %>% 
+  summarize(prev = mean(diar7d, na.rm = T) * 100)
+```
+
+We're interested in whether there are seasonal differences in prevalence between groups. Try calculating the prevalence by both treatment group and season. What do you notice?
+
+```{r}
+washb_df %>% 
+  group_by(pooled_tr, season) %>% 
+  summarize(prev = mean(diar7d, na.rm = T) * 100)
+```
+
+# Part 2: Data Processing
+
+It looks like there might be some differences in intervention effectiveness by season. We can investigate this further by plotting diarrhea prevalence in each group over time.
+
+However, there are only a few measurements that are taken on a given day, so it might be more informative to look at monthly prevalence.
+
+In the cell below, create a data frame called `prev_monthly` that calculates the prevalence of diarrhea in each group for every month.
+
+```{r}
+# Creates a copy of washb_df called washb_df_monthly
+washb_df_monthly = washb_df
+
+# Sets the date of each measurement to the first of the month, such that all 
+# measurements taken in the same month have the same date
+day(washb_df_monthly$date) = 1
+
+# Create a data frame with monthly prevalence by arm (pooled vs control)
+prev_monthly = washb_df_monthly %>% 
+  group_by(date, pooled_tr) %>% 
+  summarize(prev = mean(diar7d, na.rm = T) * 100)
+
+prev_monthly
+```
+
+### Note: handling missing values?
+
+As you scroll through, you might notice that there are some months where there were no measurements and there are no corresponding prevalence measurements.
+
+In the bar chart below, we can look at how many prevalence estimates were made for each month. There seems to be a gap in measurements in the middle of the date range.
+
+```{r}
+ggplot(prev_monthly, aes(x = date)) + 
+  geom_bar()
+```
+
+When we go to plot trends over time, a line will always connect neighboring points even if there's a gap in between. In this case, prevalence estimates from Sept 2014 will connect to those from Dec 2014 even though we don't have data for October or November.
+
+This can be misleading since the line suggests that a particular trend, even though we don't have the data to support it.
+
+To prevent this, we can add rows to the data frame for the "missing" months where the prevalence estimates are "NA". This tells ggplot not to plot anything for those months.
+
+```{r}
+# Creates a data frame with all possible combinations of months and tr groups
+#   seq.Date(...) finds all months in the study period 
+#   unique(...) finds all unique treatment groups in the study 
+all_dates = expand.grid(date = seq.Date(from = min(prev_monthly$date),
+                                        to = max(prev_monthly$date), by = "month"),
+                        pooled_tr = unique(prev_monthly$pooled_tr))
+
+# Left join to keep all months, match prevalence estimates if they exist or fill NA if they don't
+all_prev_monthly = all_dates %>% left_join(prev_monthly, by = c("date", "pooled_tr"))
+
+# Check that "missing" months are present in the new dataset
+all_prev_monthly %>% filter(is.na(prev))
+```
+
+# Part 3: Plotting!
+
+We're ready to make a figure! Plot monthly prevalence by intervention group using values from `all_prev_monthly`
+
+```{r}
+prev_over_time = 
+  ggplot(all_prev_monthly, aes(x = date, y = prev, group = pooled_tr, 
+                           color = pooled_tr, linetype = pooled_tr)) + 
+  geom_line() + 
+  scale_x_date(date_labels = "%b %Y") +
+  scale_y_continuous(breaks = seq(2, 14, 2)) + 
+  scale_color_manual(name = "Intervention Group", values = c("#88A4BE", "#E8988A")) + 
+  scale_linetype_manual(name = "Intervention Group", values = c("solid", "twodash")) + 
+  xlab("Date") + 
+  ylab("Diarrhea Prevalence (%)") + 
+  ggtitle("Monthly Diarrhea Prevalence, By Intervention") +
+  theme_minimal() + 
+  theme(legend.position = "bottom") 
+
+prev_over_time
+```
+
+# Challenge: Plotting prevalence ratio estimates
+
+We've made a nice descriptive plot above, but we can make a strong argument about the impact of weather by completing formal statistical analysis and plotting our estimates of intervention effects.
+
+Since we're looking at diarrhea prevalence, we can compare prevalence ratios associated with the intervention during the rainy season vs during the dry season.
+
+Prevalence ratios can be measured using log-binomial regression [[Reference](https://www.bookdown.org/rwnahhas/RMPH/blr-log-binomial.html)]. The prevalence ratio + 95% CIs can be calculated by taking the exponent of the coefficients associated with treatment in your model.
+
+Run the code below to generate the prevalence ratio estimates and CIs for measurements taken the rainy season. Read the comments to understand what each chunk of code does.
+
+```{r}
+# Resets the levels of tr so "Control" is the reference group
+washb_df = washb_df %>% 
+  mutate(tr = factor(tr, levels = c("Control", "Combined WSH", 
+                                    "Water", "Sanitation", "Handwashing")))
+
+# Get a log-binomial model to estimate prevalence ratios
+rainy_season_model = glm(diar7d ~ tr, 
+                         family = binomial(link="log"), 
+                         data = washb_df %>% filter(season == "yes"))
+
+# Extract coefficient, exponentiate to find prevalence ratios 
+# ([-1] excludes the intercept)
+rainy_season_prs = exp(coef(rainy_season_model)[-1])
+rainy_season_prs
+
+# Extract confidence intervals, exponentiate to find prevalence ratios 
+rainy_season_pr_cis = exp(confint(rainy_season_model)[-1, ])
+rainy_season_pr_cis
+
+# Combine PR estimates and CIs into a single table using `bind_cols`
+combined_rainy_season_estimates = 
+  data.frame(pr_est = rainy_season_prs) %>% 
+  bind_cols(rainy_season_pr_cis)
+
+# Formatting and labeling for estimates table. 
+combined_rainy_season_estimates = combined_rainy_season_estimates %>% 
+  rownames_to_column("tr") %>% # Create treatment column from row names
+  mutate(tr = str_remove(tr, "tr"), # Remove "tr" default model output
+         season = "Rainy season") %>%  # Indicate that estimates are from the rainy season
+  rename("ci_lb" = "2.5 %", "ci_ub" = "97.5 %") #Rename CI columns
+
+combined_rainy_season_estimates
+```
+
+Adapt the code above to generate a table that contains the estimates and 95% CI for PRs in each treatment group during the dry period (season == "no"). Make sure it has the *exact* same column names as `combined_rainy_season_estimates` (tr, pr_est, ci_lb, ci_ub, season).
+
+```{r}
+# Get a log-binomial model to estimate prevalence ratios
+dry_season_model = glm(diar7d ~ tr, 
+                         family = binomial(link="log"), 
+                         data = washb_df %>% filter(season == "no"))
+
+# Extract coefficient, exponentiate to find prevalence ratios 
+# ([-1] excludes the intercept)
+dry_season_prs = exp(coef(dry_season_model)[-1])
+dry_season_prs
+
+# Extract confidence intervals, exponentiate to find prevalence ratios 
+dry_season_pr_cis = exp(confint(dry_season_model)[-1, ])
+dry_season_pr_cis
+
+# Combine PR estimates and CIs into a single table using `bind_cols`
+combined_dry_season_estimates = 
+  data.frame(pr_est = dry_season_prs) %>% 
+  bind_cols(dry_season_pr_cis)
+
+# Formatting and labeling for estimates table. 
+combined_dry_season_estimates = combined_dry_season_estimates %>% 
+  rownames_to_column("tr") %>% # Create treatment column from row names
+  mutate(tr = str_remove(tr, "tr"), # Remove "tr" default model output
+         season = "Dry season") %>%  # Indicate that estimates are from the rainy season
+  rename("ci_lb" = "2.5 %", "ci_ub" = "97.5 %") #Rename CI columns
+
+combined_dry_season_estimates
+```
+
+Run the cell below to merge the estimates + CIs from the rainy and dry season into a data frame called `combined_pr_estimates`.
+
+```{r}
+combined_pr_estimates = bind_rows(combined_rainy_season_estimates, combined_dry_season_estimates)
+```
+
+Use `ggplot` to plot the estimates and error bars contained in `combined_pr_estimates`. You may need to use `position_dodge()` in `geom_point()` and `geom_line()` to avoid overlap in estimates by season.
+
+Hint: use `group = season` and `color = season`.
+
+```{r}
+ggplot(combined_pr_estimates, aes(x = pr_est, y = tr, group = season, color = season)) + 
+  geom_point(position = position_dodge(0.5)) + 
+  geom_linerange(aes(xmin = ci_lb, xmax = ci_ub), position = position_dodge(0.5)) + 
+  xlab("Prevalence Ratio (95% CI)") + 
+  ylab("") + 
+  labs(color = "Season") + 
+  theme_light() + 
+  theme(legend.position = "bottom") + 
+  ggtitle("WASH Effect Modification by Season")
+```

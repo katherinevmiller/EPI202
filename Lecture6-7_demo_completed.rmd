@@ -1,0 +1,202 @@
+---
+title: "Lectures 6 & 7 Demo"
+output: html_notebook
+---
+
+# Start to Finish Analysis for the Jackson Heart Study
+
+For Homework 4, you will need to do an analyze a dataset to answer a research question. To prepare you for this homework, we will be running through an analysis of data form the [Jackson Heart Study](https://www.jacksonheartstudy.org/). You can use this analysis we do together as a template for your homework and for future analyses.
+
+Our research question for this anaysis will be:
+
+> Is smoking associated with hypertension after controlling for sociodemographic variables?
+
+# Data Exploration
+
+Library the packages you need and import `baseline_jhs.csv`. The dataset and the codebook are on Canvas and Ed.
+
+```{r setup}
+library(here)
+library(tidyverse)
+
+jhs_data = read_csv(here("data/baseline_jhs.csv"))
+```
+
+Explore the data structure and variables. Here are some questions you should be able to answer:
+
+-   What does each row represent? - Patient
+
+-   What does each column represent? - Variable
+
+-   What is the shape of the continuous variables?
+
+    -   Issue with age, observation(s) at 999
+
+    -   Alc/week heavily right skewed
+
+-   What does each group of the categorical variables represent?
+
+    -   MaleV1 - Sex: Male or Female
+    -   IncomeV1 - 4 categories of income: Poor, Lower-middle, Upper-middle, or Affluent
+    -   edu3catV1 - 3 categories of education: \<HS, High School/GED, or Some college or more
+
+-   Which variable(s) have a lot of missingness?
+
+    -   Income is 14.5% missing
+
+```{r}
+# See part of the data
+head(jhs_data)
+
+# Continuous variable shape
+hist(jhs_data$ageV1, breaks = 100)
+summary(jhs_data$ageV1)
+hist(jhs_data$alcwV1)
+
+# Categorical variables
+table(jhs_data$maleV1, useNA = "ifany")
+table(jhs_data$IncomeV1, useNA = "ifany")
+table(jhs_data$edu3catV1, useNA = "ifany")
+
+# Missingness
+prop.table(table(is.na(jhs_data$IncomeV1)))
+mean(is.na(jhs_data$IncomeV1))
+```
+
+# Data Cleaning
+
+Based on our findings from the data exploration above, let's made a plan for data cleaning. We ***always*** want to document how we are cleaning our data outside of the code so that even people who cannot read R code know what is happening to the data.
+
+```{r}
+# These two do the same thing
+# 1) Preferred option. Assume anyone over 120 years old doesn't have a valid age
+#     Use mutate and if_else to make all of their ages NA
+clean_jhs_data = jhs_data %>%
+  mutate(ageV1 = if_else(ageV1>120, NA, ageV1))
+
+# 2) Creates two datasets. One is everyone with a valid age <120
+#     The other is everyone over 120 years, that then makes all of their ages NA
+#     We then use bind_rows to stack the two datasets
+clean_jhs_data = jhs_data %>%
+  filter(ageV1<120) %>%
+  bind_rows(jhs_data %>%
+              filter(ageV1>120) %>%
+              mutate(ageV1=NA))
+```
+
+# Descriptive Statistics
+
+## Categorical Variables
+
+First, let's look at the relative counts of smoking and hypertension in our dataset.
+
+```{r}
+clean_jhs_data = clean_jhs_data %>%
+  mutate(income2cat = case_when(IncomeV1=="Affluent" ~ "High",
+                                IncomeV1=="Upper-middle" ~ "High",
+                                is.na(IncomeV1) ~ NA,
+                                T                        ~ "Low"))
+
+table(clean_jhs_data$income2cat, clean_jhs_data$IncomeV1, useNA = "ifany")
+```
+
+What's our unadjusted odds for low income for smokers?
+
+```{r}
+table(clean_jhs_data$income2cat, clean_jhs_data$everSmokerV1)
+
+258*1104/(447*426)
+```
+
+Let's look at the different distributions of socioeconomic variables like sex, income, and education across smoking.
+
+```{r}
+table(clean_jhs_data$maleV1, clean_jhs_data$everSmokerV1)
+
+table(clean_jhs_data$edu3catV1, clean_jhs_data$everSmokerV1)
+
+chisq.test(clean_jhs_data$maleV1, clean_jhs_data$everSmokerV1)
+```
+
+## Continuous Variables
+
+Compare age across smoking and hypertension. Are the differences statistically significant?
+
+```{r}
+hist(clean_jhs_data$ageV1)
+
+hist(clean_jhs_data %>% filter(maleV1=="Male") %>% pull(ageV1))
+hist(clean_jhs_data %>% filter(maleV1=="Female") %>% pull(ageV1))
+
+t.test(ageV1~maleV1, data=clean_jhs_data)
+```
+
+Compare depression score across smoking and hypertension. Are the differences statistically significant?
+
+## Table 1
+
+Let's make the Table 1 for our paper with our exposure (smoking) on the top and all of the other variables along the side. Try doing a few by hand before using `table1`.
+
+```{r}
+# Stats by hand
+clean_jhs_data %>%
+  group_by(everSmokerV1) %>%
+  summarise(mean_age = mean(ageV1, na.rm=T),
+            median_alc = median(alcwV1, na.rm=T),
+            median_depression = median(depressionV1, na.rm=T))
+table(clean_jhs_data$maleV1, clean_jhs_data$everSmokerV1, useNA = "ifany")
+table(clean_jhs_data$IncomeV1, clean_jhs_data$everSmokerV1, useNA = "ifany")
+
+# Using table1
+library(table1)
+
+# Filter out missing smoking variables b/c table1 won't accept them
+table1_data = clean_jhs_data %>%
+  filter(!is.na(everSmokerV1))
+
+table1(~ageV1 + maleV1 + alcwV1 + IncomeV1 + edu3catV1 + dailyDiscrV1 + 
+         depressionV1 + discrmBurdenV1 + sbpV1 + dbpV1 + income2cat | 
+         everSmokerV1, data=table1_data)
+```
+
+------------------------------------------------------------------------
+
+**Start Week 7**
+
+# Statistical Modeling
+
+## Unadjusted Model
+
+Use a linear model to look at how smoking is associated with systolic blood pressure.
+
+```{r}
+
+```
+
+What do the model parameters mean?
+
+Use a logistic model to look at how smoking is associated with high blood pressure.
+
+```{r}
+
+```
+
+What do the model parameters mean?
+
+## Adjusted Model
+
+Use a linear model to look at how smoking is associated with systolic blood pressure, controlling for sociodemographic variables.
+
+```{r}
+
+```
+
+What do the model parameters mean?
+
+Use a logistic model to look at how smoking is associated with high blood pressure, controlling for sociodemographic variables.
+
+```{r}
+
+```
+
+What do the model parameters mean?
