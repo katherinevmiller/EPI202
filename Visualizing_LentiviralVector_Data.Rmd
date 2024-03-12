@@ -1,0 +1,185 @@
+---
+title: "Visualizations for 'Minimal Requirement for a Lentivirus Vector Based on HIV1'"
+output: pdf_document
+---
+
+```{r setup}
+install.packages("styler")
+install.packages("lintr")
+library(styler)
+library(lintr)
+library(here)
+library(tidyverse)
+```
+
+# Visualizations for "Minimal Requirement for a Lentivirus Vector Based on HIV1"
+
+## **Table 1: Transduction efficiency of the tat-deficient HIV vector**
+
+```{r}
+tat_def_vector <- data.frame(
+  Vector = c("pCI-neo", "pH5Z", "pH3Z", "pH4Z"),
+  Promoter = c(NA, "HIV-1 U3", "HCMV IE", "HCMV IE"),
+  Tat_expression = c(NA, 1, 1, 0),
+  mean_titer = c(0.5, 9.7 * 10^5, 2.9 * 10^5, 3 * 10^5),
+  SD = c(0, 2.4 * 10^5, 0.5 * 10^5, 0.2 * 10^5)
+)
+
+tat_def_vector
+```
+
+```{r}
+tat_def_vector_merged <- data.frame(
+  Vector = c("pCI-neo", "pH5Z + HIV-1 U3", "pH3Z + HCMV IE", "pH4Z + HCMV IE"),
+  Promoter = c(NA, "HIV-1 U3", "HCMV IE", "HCMV IE"),
+  Tat_expression = c(NA, 1, 1, 0),
+  mean_titer = c(0.5, 9.7 * 10^5, 2.9 * 10^5, 3 * 10^5),
+  SD = c(0, 2.4 * 10^5, 0.5 * 10^5, 0.2 * 10^5)
+)
+tat_def_vector_merged
+```
+
+```{r}
+ggplot(tat_def_vector_merged, aes(x = Vector, y = mean_titer, fill = Vector)) +
+  geom_col(show.legend = FALSE) +
+  geom_errorbar(aes(ymin = mean_titer - SD, 
+                    ymax = mean_titer + SD), 
+                width = 0.1) +
+  theme_classic() +
+  scale_y_log10(breaks = 10**(-1:7)) +
+  scale_fill_hue(l = 45) +
+  xlab("") +
+  ylab("Mean titer (LFU/ml of virus stock)")
+```
+
+## Table 2: Requirement of Rev/RRE for efficient vector production
+
+```{r}
+rev_req <- data.frame(
+  gag_pol_plasmid = c("pGP-RRE1 ", "pGP-RRE1", "pGP-CTEr", "pGP-CTE"),
+  Rev_expression = c(NA, 1, 1, 1),
+  RT_activity = c(4, 3400, 7, 95),
+  RT_error = c(3, 600, 1, 4),
+  mean_titer = c(0.5, 3.1 * 10^5, 2 * 10^2, 3 * 10^3),
+  titer_error = c(0, 0, 0.2 * 10^2, 1.8 * 10^3)
+)
+rev_req
+```
+
+```{r}
+ggplot(rev_req, aes(x = gag_pol_plasmid, 
+                    y = mean_titer, 
+                    fill = gag_pol_plasmid)) +
+  geom_col(show.legend = FALSE) +
+  geom_errorbar(aes(ymin = mean_titer - titer_error, 
+                    ymax = mean_titer + titer_error), 
+                width = 0.1) +
+  theme_classic() +
+  scale_y_log10(breaks = 10**(-1:7)) +
+  scale_x_discrete(limits = rev) +
+  scale_fill_hue(l = 45) +
+  xlab("gag-pol plasmid") +
+  ylab("Mean titer (LFU/ml of virus stock)")
+```
+
+## Table 3: Effect of accessory gene expression on transduction efficiency
+
+```{r}
+access_genes <- data.frame(
+  gene_of_interest = c("vif", 
+                       "vif", 
+                       "vpr", 
+                       "vpr", 
+                       "vpr", 
+                       "vpu", 
+                       "vpu", 
+                       "vpu", 
+                       "nef", 
+                       "nef", 
+                       "nef", 
+                       NA),
+  expression_plasmid = c("pGP-RRE3", 
+                         "pGP-RRE1", 
+                         "None_vpr", 
+                         "pCI-vpr_1", 
+                         "pCI-vpr_3", 
+                         "None_vpu", 
+                         "pCI-vpu_1", 
+                         "pCI-vpu_3", 
+                         "None_nef", 
+                         "pCMV-nef_1", 
+                         "pCMV-nef_3", 
+                         "MLV vector"),
+  gene_expression = c(0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, NA),
+  mean_titer_div = 10^5 * 
+    c(8.8, 8.8, 3.1, 3.0, 3.2, 4.0, 3.7, 3.5, 4.0, 1.5, 1, 55),
+  mean_titer_div_error = 10^5 * 
+    c(0.6, 0.7, 1, 0.2, 0.9, 0.8, 1.1, 0.1, 0.8, 0.5, 0, 2),
+  mean_titer_nondiv = 10^5 * 
+    c(NA, 9.2, 5.1, 3.5, 3.6, 3.2, 3.3, 3, 3.2, 2, 1, 0.00004),
+  mean_titer_nondiv_error = 10^5 * 
+    c(NA, 1.7, 1.3, 0.5, 1.1, 0.5, 1.2, 0.0, 0.5, 0.5, 0.1, 0.00003)
+)
+
+tail(access_genes)
+```
+
+```{r}
+access_genes_pos_neg <- access_genes[c(1:4, 6, 7, 9, 10, 12), ] %>%
+  mutate(comparison = case_when(
+    gene_expression == 0 ~ paste("-", gene_of_interest),
+    gene_expression == 1 ~ paste("+", gene_of_interest),
+    TRUE ~ expression_plasmid
+  ))
+access_genes_pos_neg
+```
+
+```{r}
+# dividing cells
+
+ggplot(access_genes_pos_neg, aes(
+  x = factor(comparison, level = c("- vif", "+ vif", "- vpr", "+ vpr", "- vpu", 
+                                   "+ vpu", "- nef", "+ nef", "MLV vector")),
+  y = mean_titer_div,
+  fill = comparison
+)) +
+  geom_col(show.legend = FALSE) +
+  geom_errorbar(aes(
+    ymin = mean_titer_div - mean_titer_div_error,
+    ymax = mean_titer_div + mean_titer_div_error
+  ), width = 0.1) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  scale_y_log10(breaks = 10**(-1:7)) +
+  scale_fill_hue(l = 45) +
+  xlab("") +
+  ylab("Mean titer (LFU/ml of virus stock)") +
+  ggtitle("Mean titers by construct in dividing cells")
+```
+
+```{r}
+# nondividing cells
+# remove distracting empty bar
+access_genes_no_vif_neg <- access_genes_pos_neg %>%
+  filter(!is.na(mean_titer_nondiv))
+access_genes_no_vif_neg
+
+ggplot(access_genes_no_vif_neg, aes(
+  x = factor(comparison, level = c("+ vif", "- vpr", "+ vpr", "- vpu", 
+                                   "+ vpu", "- nef", "+ nef", "MLV vector")),
+  y = mean_titer_nondiv,
+  fill = comparison
+)) +
+  geom_col(show.legend = FALSE) +
+  geom_errorbar(aes(
+    ymin = mean_titer_nondiv - mean_titer_nondiv_error,
+    ymax = mean_titer_nondiv + mean_titer_nondiv_error
+  ), width = 0.1) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  scale_y_log10(breaks = 10**(-1:7)) +
+  scale_fill_hue(l = 45) +
+  xlab("") +
+  ylab("Mean titer (LFU/ml of virus stock)") +
+  ggtitle("Mean titers by construct in growth-arrested cells")
+```
